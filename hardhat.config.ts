@@ -25,6 +25,15 @@ const config = {
     },
     networks: {
         hardhat: {
+            forking: {
+                url: "https://api.wemix.com",
+            },
+            accounts: [
+                {
+                    privateKey: process.env.KLAYTN_DEPLOYER,
+                    balance: "1000000000000000000000000000",
+                },
+            ],
             // companionNetworks: {
             //     mainnet: process.env.FORKING_NETWORK?.toLowerCase()!,
             // },
