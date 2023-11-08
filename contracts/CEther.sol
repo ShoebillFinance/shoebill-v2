@@ -184,6 +184,7 @@ contract CEther is CToken {
         uint amount
     ) internal virtual override {
         /* Send the Ether, with minimal gas and revert on failure */
-        to.transfer(amount);
+        (bool success, ) = to.call{value: amount}("");
+        require(success, "CEther::doTransferOut: Ether transfer failed");
     }
 }
