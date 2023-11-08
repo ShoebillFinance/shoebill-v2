@@ -3,6 +3,7 @@ pragma solidity ^0.8.10;
 
 import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
+import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
 import "./CTokenInterfaces.sol";
 import "./EIP20Interface.sol";
@@ -422,7 +423,7 @@ contract RewardDistributor is
     ) internal returns (uint256) {
         uint256 remaining = EIP20Interface(token).balanceOf(address(this));
         if (amount > 0 && amount <= remaining) {
-            EIP20Interface(token).transfer(user, amount);
+            SafeERC20.safeTransfer(IERC20(token), user, amount);
 
             emit RewardGranted(token, user, amount);
 
