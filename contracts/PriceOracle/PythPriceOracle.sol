@@ -14,6 +14,7 @@ contract PythPriceOracle is PriceOracle {
     string public constant stWEMIXSymbol = "sbstWEMIX";
     address public constant stWEMIX =
         0x9B377bd7Db130E8bD2f3641E0E161cB613DA93De;
+    uint256 public constant age = 60 * 15;
 
     constructor(
         string[] memory symbols_,
@@ -53,11 +54,8 @@ contract PythPriceOracle is PriceOracle {
     ) internal view returns (uint256, uint256) {
         require(address(priceFeeds[symbol]) != address(0), "missing priceFeed");
 
-        // call unsafePrice to avoid revert
-        // see https://docs.pyth.network/evm/get-price-unsafe
-        PythStructs.Price memory priceData = priceFeeds[symbol].getPriceUnsafe(
-            priceIds[symbol]
-        );
+        PythStructs.Price memory priceData = priceFeeds[symbol]
+            .getPriceNoOlderThan(priceIds[symbol], age);
 
         require(priceData.price > 0, "price cannot be zero");
         uint256 uPrice = uint256(uint64(priceData.price));
