@@ -1060,6 +1060,14 @@ contract Comptroller is
     ) external returns (uint256) {
         // Check caller is admin
         require(msg.sender == admin, "only admin can set close factor");
+        require(
+            newCloseFactorMantissa <= closeFactorMaxMantissa,
+            "new close factor is too large"
+        );
+        require(
+            newCloseFactorMantissa >= closeFactorMinMantissa,
+            "new close factor is too small"
+        );
 
         uint256 oldCloseFactorMantissa = closeFactorMantissa;
         closeFactorMantissa = newCloseFactorMantissa;
