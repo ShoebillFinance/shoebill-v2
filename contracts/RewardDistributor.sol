@@ -9,6 +9,9 @@ import "./CTokenInterfaces.sol";
 import "./EIP20Interface.sol";
 import "./ExponentialNoError.sol";
 
+import "./Token/IGovernanceShoebillToken.sol";
+import "./Token/IMiningReferral.sol";
+
 struct RewardMarketState {
     /// @notice The supply speed for each market
     uint256 supplySpeed;
@@ -87,6 +90,11 @@ contract RewardDistributor is
     /// @notice Flag to check if reward token added before
     mapping(address => bool) public rewardTokenExists;
 
+    // update shoebill boost
+
+    IGovernanceShoebillToken public gShoebillToken;
+    IMiningReferral public miningReferral;
+
     modifier onlyComptroller() {
         require(
             msg.sender == comptroller,
@@ -99,6 +107,14 @@ contract RewardDistributor is
         __Ownable_init();
 
         comptroller = comptroller_;
+    }
+
+    function setGShoebillToken(address _gShoebillToken) external onlyOwner {
+        gShoebillToken = IGovernanceShoebillToken(_gShoebillToken);
+    }
+
+    function setMiningReferral(address _miningReferral) external onlyOwner {
+        miningReferral = IMiningReferral(_miningReferral);
     }
 
     function _whitelistToken(address rewardToken_) public onlyOwner {
@@ -423,9 +439,35 @@ contract RewardDistributor is
     ) internal returns (uint256) {
         uint256 remaining = EIP20Interface(token).balanceOf(address(this));
         if (amount > 0 && amount <= remaining) {
-            SafeERC20.safeTransfer(IERC20(token), user, amount);
+            uint256 amountToSend = amount;
+            if (address(gShoebillToken) != address(0)) {
+                uint256 boostMultiplier = gShoebillToken.getBoostMultiplier(
+                    user
+                );
+                amountToSend = (amount * boostMultiplier) / 10000;
+            }
+            if (address(miningReferral) != address(0)) {
+                address referrer = miningReferral.getReferrer(user);
+                if (referrer != address(0)) {
+                    // 50:50 ratio for referrer and user
+                    uint256 referralAmount = (miningReferral.bonusRate(user)) /
+                        10000;
+                    SafeERC20.safeTransfer(
+                        IERC20(token),
+                        referrer,
+                        referralAmount
+                    );
+                    miningReferral.recordReferralCommission(
+                        referrer,
+                        referralAmount
+                    );
 
-            emit RewardGranted(token, user, amount);
+                    amountToSend = amountToSend + referralAmount;
+                }
+            }
+            SafeERC20.safeTransfer(IERC20(token), user, amountToSend);
+
+            emit RewardGranted(token, user, amountToSend);
 
             return 0;
         }
