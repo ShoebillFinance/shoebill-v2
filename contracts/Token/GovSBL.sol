@@ -9,7 +9,6 @@ import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC721/IERC721Receiver.sol";
 import "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 
-// import ierc721receiver
 interface ILinearUnstakingStage {
     function enterUnstakingStage(address user, uint256 amount) external;
 }
@@ -18,23 +17,30 @@ interface IPenaltyUnstakingStage {
     function enterUnstakingStage(address user, uint256 amount) external;
 }
 
-interface IRewardDistributor {
-    function claim(address[] memory holders) external;
+interface IClaimComp {
+    function claimComp(address holder) external;
 }
 
-contract GovernanceShoebillToken is
-    ERC20Upgradeable,
-    OwnableUpgradeable,
-    IERC721Receiver
-{
+interface IExteranlMultiRewarder {
+    function refreshReward(address _user) external;
+}
+
+/// @title GovSBL
+/// @notice Shoebill Governance staking contract
+/// @dev G.SBL has tier system, boost from staked amount and boost from NFT with max boost
+/// @dev G.SBL can be unstaked with linear vesting or penalty vesting
+/// @dev G.SBL holder can earn external reward.
+contract GovSBL is ERC20Upgradeable, OwnableUpgradeable, IERC721Receiver {
     using SafeERC20 for IERC20;
 
-    uint256 public totalStaked; // total balance of sbp
-    IERC20 public token; // sbp
+    IERC20 public shoebill; // SBL
 
     ILinearUnstakingStage public linearUnstakingStage;
     IPenaltyUnstakingStage public penaltyUnstakingStage;
-    IRewardDistributor public rewardDistributor;
+
+    IClaimComp[] public unitrollers; // unitrollers (manta has 2 markets)
+
+    IExteranlMultiRewarder public externalMultiRewarder;
 
     // =============================== BOOST ===================================
     uint256 public maxBoostMultiplier; // 100% => 2x // denominator: 10000
@@ -54,8 +60,9 @@ contract GovernanceShoebillToken is
 
     event SetLinearUnstakingStage(address indexed linearUnstakingStage);
     event SetPenaltyUnstakingStage(address indexed penaltyUnstakingStage);
-    event SetRewardDistributor(address indexed rewardDistributor);
+    event SetExternalRewarder(address indexed rewarder);
     event Stake(address indexed user, uint256 amount, uint256 shares);
+    event StakeNFT(address indexed user, address indexed nft, uint256 tokenId);
     event Unstake(
         address indexed user,
         uint256 amount,
@@ -68,9 +75,9 @@ contract GovernanceShoebillToken is
         _disableInitializers();
     }
 
-    function initialize(address _token) external initializer {
+    function initialize(address _shoebill) external initializer {
         __Governance_init();
-        token = IERC20(_token);
+        shoebill = IERC20(_shoebill);
 
         maxBoostMultiplier = 20000;
 
@@ -87,7 +94,7 @@ contract GovernanceShoebillToken is
     }
 
     function __Governance_init() internal initializer {
-        __ERC20_init("Governance Shoebill Token", "G.SBT");
+        __ERC20_init("Governance Shoebill", "G.SBL");
         __Ownable_init();
     }
 
@@ -109,12 +116,26 @@ contract GovernanceShoebillToken is
         emit SetPenaltyUnstakingStage(_penaltyUnstakingStage);
     }
 
-    function setRewardDistributor(
-        address _rewardDistributor
+    function setExternalMultiRewarder(
+        address _externalMultiRewarder
     ) external onlyOwner {
-        rewardDistributor = IRewardDistributor(_rewardDistributor);
+        externalMultiRewarder = IExteranlMultiRewarder(_externalMultiRewarder);
 
-        emit SetRewardDistributor(_rewardDistributor);
+        emit SetExternalRewarder(_externalMultiRewarder);
+    }
+
+    function addUnitroller(address _unitroller) external onlyOwner {
+        unitrollers.push(IClaimComp(_unitroller));
+    }
+
+    function removeUnitroller(address _unitroller) external onlyOwner {
+        for (uint256 i = 0; i < unitrollers.length; i++) {
+            if (address(unitrollers[i]) == _unitroller) {
+                unitrollers[i] = unitrollers[unitrollers.length - 1];
+                unitrollers.pop();
+                break;
+            }
+        }
     }
 
     function addTier(uint256 _amount, uint256 _boost) external onlyOwner {
@@ -170,7 +191,7 @@ contract GovernanceShoebillToken is
     }
 
     function stakeAll(address _user) external {
-        _stake(_user, token.balanceOf(msg.sender));
+        _stake(_user, shoebill.balanceOf(msg.sender));
     }
 
     function unstake(
@@ -184,8 +205,8 @@ contract GovernanceShoebillToken is
         _unstake(balanceOf(msg.sender), _unstakingStage);
     }
 
-    function stakeNFT(IERC721 _nft) external {
-        _stakeNFT(_nft);
+    function stakeNFT(IERC721 _nft, uint256 _tokenId) external {
+        _stakeNFT(_nft, _tokenId);
     }
 
     // =============================== INTERNAL ===================================
@@ -202,13 +223,14 @@ contract GovernanceShoebillToken is
         if (totalSupply_ == 0) {
             shares = _amount;
         } else {
-            shares = (_amount * totalSupply_) / token.balanceOf(address(this));
+            shares =
+                (_amount * totalSupply_) /
+                shoebill.balanceOf(address(this));
         }
 
-        token.safeTransferFrom(msg.sender, address(this), _amount);
+        shoebill.safeTransferFrom(msg.sender, address(this), _amount);
 
         _mint(_user, shares);
-        totalStaked += _amount;
 
         emit Stake(_user, _amount, shares);
     }
@@ -219,18 +241,17 @@ contract GovernanceShoebillToken is
     /// @param _unstakingStage 0 = linear, 1 = penalty
     function _unstake(uint256 _shares, uint256 _unstakingStage) internal {
         _beforeAction(msg.sender);
-        uint256 amount = (_shares * token.balanceOf(address(this))) /
+        uint256 amount = (_shares * shoebill.balanceOf(address(this))) /
             totalSupply();
 
         _burn(msg.sender, _shares);
-        totalStaked -= amount;
 
         if (_unstakingStage == 0) {
-            IERC20(token).approve(address(linearUnstakingStage), amount);
+            IERC20(shoebill).approve(address(linearUnstakingStage), amount);
             linearUnstakingStage.enterUnstakingStage(msg.sender, amount);
             emit Unstake(msg.sender, amount, _shares, _unstakingStage);
         } else if (_unstakingStage == 1) {
-            IERC20(token).approve(address(penaltyUnstakingStage), amount);
+            IERC20(shoebill).approve(address(penaltyUnstakingStage), amount);
             penaltyUnstakingStage.enterUnstakingStage(msg.sender, amount);
             emit Unstake(msg.sender, amount, _shares, _unstakingStage);
         } else {
@@ -241,20 +262,28 @@ contract GovernanceShoebillToken is
     /// @notice Stake Approved boost item NFT
     /// @dev boost changed,  transferFrom nft to user
     /// @param _nft nft address
-    function _stakeNFT(IERC721 _nft) internal {
+    function _stakeNFT(IERC721 _nft, uint256 _tokenId) internal {
         _beforeAction(msg.sender);
 
-        _nft.safeTransferFrom(msg.sender, address(this), 1);
+        _nft.safeTransferFrom(msg.sender, address(this), _tokenId);
 
         nftBalance[msg.sender][address(_nft)] += 1;
+
+        emit StakeNFT(msg.sender, address(_nft), _tokenId);
     }
 
     /// @notice Before action hook
     /// @dev claim reward before re-calculate boost
     function _beforeAction(address _user) internal {
-        address[] memory holders = new address[](1);
-        holders[0] = _user;
-        rewardDistributor.claim(holders);
+        // 1. call extenal reward (boost x) based on g.sbl balance
+        if (address(externalMultiRewarder) != address(0)) {
+            try externalMultiRewarder.refreshReward(_user) {} catch {}
+        }
+
+        // 2. claim unitroller reward (boost, refferal)
+        for (uint256 i; i < unitrollers.length; i++) {
+            unitrollers[i].claimComp(_user);
+        }
     }
 
     // =============================== VIEW ===================================
@@ -265,8 +294,8 @@ contract GovernanceShoebillToken is
     ) public view returns (uint256) {
         uint256 boostMultiplier = 10000;
 
+        uint256 staked = balanceOf(_user);
         for (uint256 i; i < balanceTierRequired.length; i++) {
-            uint256 staked = balanceOf(_user);
             if (staked >= balanceTierRequired[i]) {
                 boostMultiplier =
                     (boostMultiplier * balanceTierMultiplier[i]) /
@@ -317,11 +346,11 @@ contract GovernanceShoebillToken is
         address to,
         uint256 amount
     ) internal override {
-        // claim reward before re-calculate boost
-        _beforeAction(from);
-        _beforeAction(to);
-
         super._beforeTokenTransfer(from, to, amount);
+        require(
+            from == address(0) || to == address(0),
+            "G.SBL: transfer disabled"
+        );
     }
 
     function onERC721Received(

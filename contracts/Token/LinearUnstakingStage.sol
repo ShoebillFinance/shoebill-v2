@@ -6,8 +6,13 @@ import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
-import "./IGovernanceShoebillToken.sol";
+import "./IGovSBL.sol";
 
+/// @title LinearUnstakingStage
+/// @notice Implements  unstaking GovSBL to SBL with linear release
+/// @dev Unstaking amount will be released linearly during unstaking period
+/// @dev User can claim, or restake during unstaking period
+/// @dev Every Unstakes will claim releasable amount and restart unstaking period
 contract LinearUnstakingStage is OwnableUpgradeable {
     using SafeERC20 for IERC20;
 
@@ -53,8 +58,15 @@ contract LinearUnstakingStage is OwnableUpgradeable {
         unstakingPeriod = 40 days;
     }
 
-    /// @notice Penalty Unstake function called by GShoebillToken
-    /// @dev Only GShoebillToken can call this function
+    function updateUnstakingPeriod(
+        uint256 _unstakingPeriod
+    ) external onlyOwner {
+        unstakingPeriod = _unstakingPeriod;
+        emit UpdateUnstakingPeriod(unstakingPeriod);
+    }
+
+    /// @notice Unstake function called by GShoebillToken
+    /// @dev 1. claim releasable amount 2. restart unstaking period including (un-released amount + new amount)
     /// @param user The user address
     /// @param amount Amounts of tokens that user want to unstake
     function enterUnstakingStage(
@@ -65,7 +77,6 @@ contract LinearUnstakingStage is OwnableUpgradeable {
 
         if (info.unstakeAmount > 0) {
             uint256 claimableAmount;
-            // unstake complete
             if (block.timestamp >= info.completeTimestamp) {
                 claimableAmount = info.unstakeAmount;
             } else {
@@ -94,6 +105,8 @@ contract LinearUnstakingStage is OwnableUpgradeable {
         emit EnterUnstakingStage(user, amount, info.completeTimestamp);
     }
 
+    /// @dev 1. claim releasable amount
+    /// @param user The user address
     function claim(address user) external {
         UnstakingInfo storage info = unstakingRequest[user];
 
@@ -145,7 +158,8 @@ contract LinearUnstakingStage is OwnableUpgradeable {
         completeTimestamp = info.completeTimestamp;
     }
 
-    // back to gShoebill
+    /// @notice Restake function
+    /// @dev 1. All unstake amount will be restaked onbehalf of msg sender (releasable + unreleased amount)
     function restake() external {
         UnstakingInfo storage info = unstakingRequest[msg.sender];
         require(info.unstakeAmount > 0, "No unstake amount");
@@ -156,10 +170,7 @@ contract LinearUnstakingStage is OwnableUpgradeable {
 
         IERC20(shoebillToken).approve(gShoebillToken, info.unstakeAmount);
 
-        IGovernanceShoebillToken(gShoebillToken).stake(
-            msg.sender,
-            info.unstakeAmount
-        );
+        IGovSBL(gShoebillToken).stake(msg.sender, info.unstakeAmount);
 
         emit Restake(msg.sender, info.unstakeAmount);
     }

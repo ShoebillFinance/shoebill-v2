@@ -6,8 +6,13 @@ import "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
-import "./IGovernanceShoebillToken.sol";
+import "./IGovSBL.sol";
 
+/// @title PenaltyUnstakingStage
+/// @notice Implements  unstaking GovSBL to SBL without locked period but with penalty
+/// @dev Unstaking amount will be released linearly during unstaking period
+/// @dev User can claim, or restake during unstaking period
+/// @dev Every Unstakes will claim releasable amount and restart unstaking period
 contract PenaltyUnstakingStage is OwnableUpgradeable {
     using SafeERC20 for IERC20;
 
@@ -28,7 +33,7 @@ contract PenaltyUnstakingStage is OwnableUpgradeable {
         uint256 penaltyAmount,
         uint256 holderAmount
     );
-    event BuyGSBT(address indexed user, uint256 burnAmount, uint256 amount);
+    event BuyGSBL(address indexed user, uint256 burnAmount, uint256 amount);
 
     modifier onlyGShoebillToken() {
         require(msg.sender == gShoebillToken, "Only GShoebillToken");
@@ -96,10 +101,10 @@ contract PenaltyUnstakingStage is OwnableUpgradeable {
         emit EnterUnstakingStage(user, amount, penaltyAmount, holderAmount);
     }
 
-    /// @notice Buy G.SBT
-    /// @dev User can acquire G.SBT through buying G.SBT with bonus
-    /// @param amount SBT amount to buy G.SBT
-    function buyGSBT(uint256 amount) external {
+    /// @notice Buy G.SBL with bonus
+    /// @dev User can acquire G.SBL through buying G.SBL with bonus
+    /// @param amount SBL amount to buy G.SBL
+    function buyGSBL(uint256 amount) external {
         uint256 currentAvailableAmount = IERC20(shoebillToken).balanceOf(
             address(this)
         );
@@ -116,9 +121,9 @@ contract PenaltyUnstakingStage is OwnableUpgradeable {
 
         IERC20(shoebillToken).approve(gShoebillToken, amount);
 
-        IGovernanceShoebillToken(gShoebillToken).stake(msg.sender, amount);
+        IGovSBL(gShoebillToken).stake(msg.sender, amount);
 
-        emit BuyGSBT(msg.sender, discountedAmount, amount);
+        emit BuyGSBL(msg.sender, discountedAmount, amount);
     }
 
     // available amount to buy g.sbt
