@@ -1413,6 +1413,10 @@ contract Comptroller is
         // Store rewardDistributor with value newRewardDistributor
         rewardDistributor = newRewardDistributor;
 
+        //  Timely Reward Distribution Upon Distributor Changes
+        address[] memory holders = new address[](0);
+        claimComp(holders, allMarkets, true, true);
+
         // Emit NewRewardDistributor(OldRewardDistributor, NewRewardDistributor)
         emit NewRewardDistributor(oldRewardDistributor, newRewardDistributor);
     }
