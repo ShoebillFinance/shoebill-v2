@@ -33,7 +33,7 @@ contract PenaltyUnstakingStage is OwnableUpgradeable {
         uint256 penaltyAmount,
         uint256 holderAmount
     );
-    event BuyGSBL(address indexed user, uint256 burnAmount, uint256 amount);
+    event BuyGSBL(address indexed user, uint256 principal, uint256 bonus);
 
     modifier onlyGShoebillToken() {
         require(msg.sender == gShoebillToken, "Only GShoebillToken");
@@ -55,7 +55,7 @@ contract PenaltyUnstakingStage is OwnableUpgradeable {
 
         penaltyRate = 8000;
         holderRate = 5000;
-        discountRate = 5000;
+        discountRate = 2000;
     }
 
     function updatePenaltyRate(uint256 _penaltyRate) external onlyOwner {
@@ -108,22 +108,21 @@ contract PenaltyUnstakingStage is OwnableUpgradeable {
         uint256 currentAvailableAmount = IERC20(shoebillToken).balanceOf(
             address(this)
         );
-        require(currentAvailableAmount >= amount, "Not enough sale amount");
+        uint256 bonusAmount = (amount * discountRate) / 10000;
 
-        uint256 discountedAmount = (amount * discountRate) / 10000;
-
-        // discounted amount from user will be burned
-        IERC20(shoebillToken).safeTransferFrom(
-            msg.sender,
-            address(0),
-            discountedAmount
+        require(
+            currentAvailableAmount >= bonusAmount,
+            "Not enough sale amount"
         );
 
-        IERC20(shoebillToken).approve(gShoebillToken, amount);
+        // discounted amount from user will be burned
+        IERC20(shoebillToken).safeTransferFrom(msg.sender, address(0), amount);
 
-        IGovSBL(gShoebillToken).stake(msg.sender, amount);
+        IERC20(shoebillToken).approve(gShoebillToken, amount + bonusAmount);
 
-        emit BuyGSBL(msg.sender, discountedAmount, amount);
+        IGovSBL(gShoebillToken).stake(msg.sender, amount + bonusAmount);
+
+        emit BuyGSBL(msg.sender, amount, bonusAmount);
     }
 
     // available amount to buy g.sbt

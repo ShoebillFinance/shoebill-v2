@@ -23,6 +23,7 @@ interface IClaimComp {
 
 interface IExteranlMultiRewarder {
     function refreshReward(address _user) external;
+    function refreshAndGetReward(address _user) external;
 }
 
 /// @title GovSBL
@@ -56,6 +57,10 @@ contract GovSBL is ERC20Upgradeable, OwnableUpgradeable, IERC721Receiver {
     // Balance Tier => multiplier
     mapping(uint256 => uint256) public balanceTierMultiplier; // 11000 = 10% boost
 
+    // =============================== ADDED ===================================
+
+    uint256 public deployedAt;
+
     // =============================== EVENT ===================================
 
     event SetLinearUnstakingStage(address indexed linearUnstakingStage);
@@ -79,7 +84,8 @@ contract GovSBL is ERC20Upgradeable, OwnableUpgradeable, IERC721Receiver {
         __Governance_init();
         shoebill = IERC20(_shoebill);
 
-        maxBoostMultiplier = 20000;
+        maxBoostMultiplier = 10000; // 1x at start
+        // maxBoostMultiplier = 20000;
 
         balanceTierRequired.push(1000 ether);
         balanceTierMultiplier[0] = 10500; // 1.05x
@@ -90,11 +96,13 @@ contract GovSBL is ERC20Upgradeable, OwnableUpgradeable, IERC721Receiver {
         balanceTierRequired.push(3000 ether);
         balanceTierMultiplier[2] = 12500; // 1.25x
 
-        // if user hld more than 6000 sbp, they will get 1.05x * 1.125x * 1.25x = 1.40625x
+        // if user hld more than 3000 sbp, they will get 1.05x * 1.125x * 1.25x = 1.40625x
+
+        deployedAt = block.timestamp;
     }
 
     function __Governance_init() internal initializer {
-        __ERC20_init("Governance Shoebill", "G.SBL");
+        __ERC20_init("Governance Shoebill", "gSBL");
         __Ownable_init();
     }
 
@@ -205,8 +213,10 @@ contract GovSBL is ERC20Upgradeable, OwnableUpgradeable, IERC721Receiver {
         _unstake(balanceOf(msg.sender), _unstakingStage);
     }
 
-    function stakeNFT(IERC721 _nft, uint256 _tokenId) external {
-        _stakeNFT(_nft, _tokenId);
+    function stakeNFT(IERC721 _nft, uint256[] memory _tokenIds) external {
+        for (uint256 i; i < _tokenIds.length; i++) {
+            _stakeNFT(_nft, _tokenIds[i]);
+        }
     }
 
     // =============================== INTERNAL ===================================
@@ -218,21 +228,23 @@ contract GovSBL is ERC20Upgradeable, OwnableUpgradeable, IERC721Receiver {
     function _stake(address _user, uint256 _amount) internal {
         _beforeAction(_user);
 
-        uint256 shares;
-        uint256 totalSupply_ = totalSupply();
-        if (totalSupply_ == 0) {
-            shares = _amount;
-        } else {
-            shares =
-                (_amount * totalSupply_) /
-                shoebill.balanceOf(address(this));
+        if (_amount > 0) {
+            uint256 shares;
+            uint256 totalSupply_ = totalSupply();
+            if (totalSupply_ == 0) {
+                shares = _amount;
+            } else {
+                shares =
+                    (_amount * totalSupply_) /
+                    shoebill.balanceOf(address(this));
+            }
+
+            shoebill.safeTransferFrom(msg.sender, address(this), _amount);
+
+            _mint(_user, shares);
+
+            emit Stake(_user, _amount, shares);
         }
-
-        shoebill.safeTransferFrom(msg.sender, address(this), _amount);
-
-        _mint(_user, shares);
-
-        emit Stake(_user, _amount, shares);
     }
 
     /// @notice Unstake g.sbp to sbp with vesting
@@ -277,7 +289,7 @@ contract GovSBL is ERC20Upgradeable, OwnableUpgradeable, IERC721Receiver {
     function _beforeAction(address _user) internal {
         // 1. call extenal reward (boost x) based on g.sbl balance
         if (address(externalMultiRewarder) != address(0)) {
-            try externalMultiRewarder.refreshReward(_user) {} catch {}
+            try externalMultiRewarder.refreshAndGetReward(_user) {} catch {}
         }
 
         // 2. claim unitroller reward (boost, refferal)
@@ -310,11 +322,10 @@ contract GovSBL is ERC20Upgradeable, OwnableUpgradeable, IERC721Receiver {
         uint256 boostMultiplier = 10000;
 
         for (uint256 i; i < boostNft.length; i++) {
-            for (uint256 j; j < nftBalance[_user][boostNft[i]]; j++) {
-                boostMultiplier =
-                    (boostMultiplier * boostNftMultiplier[boostNft[i]]) /
-                    10000;
-            }
+            boostMultiplier =
+                boostMultiplier +
+                nftBalance[_user][boostNft[i]] *
+                boostNftMultiplier[boostNft[i]];
         }
 
         return boostMultiplier < 10000 ? 10000 : boostMultiplier;
@@ -338,6 +349,15 @@ contract GovSBL is ERC20Upgradeable, OwnableUpgradeable, IERC721Receiver {
         return boostMultiplier;
     }
 
+    function balanceTierInfo() external view returns (uint256[] memory) {
+        uint256[] memory result = new uint256[](balanceTierRequired.length);
+        for (uint256 i; i < balanceTierRequired.length; i++) {
+            result[i] = balanceTierRequired[i];
+        }
+
+        return result;
+    }
+
     // =============================== OVERRIDEN ===================================
 
     // can not transfer
@@ -349,7 +369,7 @@ contract GovSBL is ERC20Upgradeable, OwnableUpgradeable, IERC721Receiver {
         super._beforeTokenTransfer(from, to, amount);
         require(
             from == address(0) || to == address(0),
-            "G.SBL: transfer disabled"
+            "gSBL: transfer disabled"
         );
     }
 
