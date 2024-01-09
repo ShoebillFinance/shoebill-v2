@@ -166,11 +166,10 @@ contract LinearUnstakingStage is OwnableUpgradeable {
 
         info.lastClaimTimestamp = block.timestamp;
         info.completeTimestamp = block.timestamp + unstakingPeriod;
-        info.unstakeAmount = 0;
-
         IERC20(shoebillToken).approve(gShoebillToken, info.unstakeAmount);
-
         IGovSBL(gShoebillToken).stake(msg.sender, info.unstakeAmount);
+
+        info.unstakeAmount = 0;
 
         emit Restake(msg.sender, info.unstakeAmount);
     }

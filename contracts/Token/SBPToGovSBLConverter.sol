@@ -21,6 +21,9 @@ contract SBPToGovSBLConverter is OwnableUpgradeable {
     address public gShoebillToken; // govSBL
     uint256 public convertRate; // sbp to sbl rate in 1e18 (sbp * convertRate / 1e18 = sbl)
 
+    mapping(address => uint256) sbpCommitments;
+    uint256 totalSbpCommitments;
+
     constructor() {
         _disableInitializers();
     }
@@ -69,9 +72,13 @@ contract SBPToGovSBLConverter is OwnableUpgradeable {
             amount
         );
 
+        sbpCommitments[msg.sender] += amount;
+        totalSbpCommitments += amount;
+
         uint256 convertAmount = pointToToken(amount);
 
         IERC20(shoebillToken).approve(gShoebillToken, convertAmount);
+
         IGovSBL(gShoebillToken).stake(msg.sender, convertAmount);
     }
 
